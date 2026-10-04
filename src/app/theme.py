@@ -1,8 +1,9 @@
 """Design tokens for the myftp UI.
 
-The palette is sampled directly from ``sample.png`` (the design mock), so the
-live app and the mock share one source of truth. Keep this module free of
-logic beyond tiny derivations — views import constants from here.
+The palette was sampled from the original design mock, so the hex values
+below are the source of truth — the mock itself is gone, don't go looking
+for it. Keep this module free of logic beyond tiny derivations: views import
+constants from here.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import flet as ft
 
 from .models import stable_hash
 
-# --- palette (sampled from sample.png) -----------------------------------
+# --- palette ---------------------------------------------------------------
 
 BG = "#647AB3"  # periwinkle app background
 BG_DEEP = "#5C74B0"

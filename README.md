@@ -4,8 +4,6 @@ A peer-to-peer file and folder transfer app for devices on the same local
 network. One machine picks a peer on a radar screen, chooses files or a whole
 folder, and the other machine accepts — no server, no cloud, no internet.
 
-![Design mock](sample.png)
-
 * **UI** — Flet 1.0 (`src/main.py` → `src/app/`), desktop or browser.
 * **Transport** — `src/lanlink/`, a stdlib-only library: UDP beacons find
   peers, one TCP connection moves the bytes.
