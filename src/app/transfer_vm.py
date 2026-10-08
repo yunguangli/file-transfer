@@ -127,9 +127,20 @@ class TransferViewModel:
     # --- outgoing flow ---------------------------------------------------
 
     def ring(self) -> None:
-        """Handshake sent; waiting for the other side to answer."""
+        """Handshake sent; waiting for the other side to answer.
+
+        Also re-arms ``direction``: accepting an incoming offer leaves it at
+        IN, and nothing else on the outgoing path resets it, so a later send
+        would be drawn as "Receiving from …".
+        """
         self._require({Phase.PICKED}, "start outgoing transfer")
-        self._set(phase=Phase.RINGING, record=None, error="", progress=None)
+        self._set(
+            phase=Phase.RINGING,
+            direction=Direction.OUT,
+            record=None,
+            error="",
+            progress=None,
+        )
 
     # --- incoming flow ---------------------------------------------------
 

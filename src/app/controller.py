@@ -710,6 +710,7 @@ class App:
                 peer.port,
                 offer,
                 reply_timeout=protocol.ANSWER_TIMEOUT,
+                on_connected=self._remember_conn,
             )
         except CallRejected:
             self._fail_inplace("They declined the transfer")
@@ -721,14 +722,23 @@ class App:
             self._fail_inplace(f"Could not reach {peer.host}")
             return
         except TransferAborted:
+            # A closed socket means either the peer hung up or we did; only
+            # the first is worth reporting, the second is already on screen.
+            if self._cancel_requested:
+                self._active_conn = None
+                return
             self._fail_inplace("They did not answer in time")
             return
         except Exception as ex:  # noqa: BLE001 - anything the network threw
+            if self._cancel_requested:
+                self._active_conn = None
+                return
             _log.exception("dial failed")
             self._fail_inplace(f"Call failed ({ex})")
             return
 
         if self._cancel_requested:
+            self._active_conn = None
             await conn.close()
             return
 
@@ -801,6 +811,16 @@ class App:
         self._render_field()
         self._paint_action()
 
+    def _remember_conn(self, conn) -> None:
+        """Publish the live socket so "cancel" can hang up on a ringing call.
+
+        ``dial`` only hands its connection back once the peer has answered, so
+        during RINGING there is otherwise nothing for :meth:`_cancel_active`
+        to close. Cleared again by ``_start_outgoing`` once the outcome is
+        known.
+        """
+        self._active_conn = conn
+
     def _cancel_active(self) -> None:
         phase = self.transfer.phase
         if phase is Phase.INCOMING:
@@ -809,6 +829,13 @@ class App:
         if phase is Phase.RINGING:
             self._cancel_requested = True
             self._fail_inplace("You cancelled the call")
+            conn = self._active_conn
+            if conn is not None:
+                # Closing it ends the wait for their answer. Without this the
+                # sender stayed parked in `dial` for the whole answer timeout
+                # while a peer who *had* accepted streamed into a socket
+                # nobody was reading — wedging them, not us.
+                self.page.run_task(conn.close)
             return
         if phase is Phase.TRANSFERRING:
             self._cancel_requested = True
@@ -838,6 +865,9 @@ class App:
                 return
             self._pending_offer = offer
         self._receiving_started = False
+        # A cancel from an earlier outgoing transfer stays latched otherwise,
+        # and would abort this one's very first chunk.
+        self._cancel_requested = False
         try:
             self.transfer.incoming(
                 IncomingOffer(
@@ -912,6 +942,9 @@ class App:
             raise HandshakeError(str(ex)) from ex
 
         self._receiving_started = True
+        # Same slot the sender uses, so "stop" can actually close the socket:
+        # only one transfer is ever live (`is_busy` refuses an overlap).
+        self._active_conn = conn
         started = time.time()
         dest = protocol.new_destination(
             self.dest_base,
@@ -939,6 +972,8 @@ class App:
         except Exception:
             writer.close()
             raise
+        finally:
+            self._active_conn = None
 
         record = TransferRecord(
             direction=Direction.IN,

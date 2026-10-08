@@ -185,6 +185,7 @@ async def dial(
     *,
     connect_timeout: float = 5.0,
     reply_timeout: float = REPLY_TIMEOUT,
+    on_connected: Optional[Callable[[Connection], None]] = None,
     on_waiting: Optional[Callable[[], None]] = None,
 ) -> Connection:
     """Call a peer: connect, present `handshake`, wait for the answer.
@@ -194,6 +195,12 @@ async def dial(
     TransferAborted if it hangs up before answering.
     `on_waiting` fires once the handshake is sent (still waiting for the
     reply) so the UI can show "Ringing...".
+    `on_connected` fires as soon as the socket is up — before the handshake —
+    handing out the live `Connection`. `dial` only returns *after* the answer,
+    so a caller that needs to hang up mid-wait (the user cancels a ringing
+    call) has no other way to reach the socket; closing it makes the pending
+    read fail with TransferAborted. Handlers run inside the failure path, so
+    throwing from one still closes the connection.
     """
     try:
         reader, writer = await asyncio.wait_for(
@@ -203,6 +210,8 @@ async def dial(
         raise PeerGone(f"could not reach {host}:{port} ({ex})") from ex
     conn = Connection(reader, writer)
     try:
+        if on_connected is not None:
+            on_connected(conn)
         await conn.send_json(handshake)
         if on_waiting is not None:
             on_waiting()
