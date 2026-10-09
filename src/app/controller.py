@@ -149,6 +149,7 @@ class App:
         self._discovery: Optional[Discovery] = None
         self._pending_offer: Optional[protocol.Offer] = None
         self._accept_future: Optional[asyncio.Future] = None
+        self._consent_answered = False
         self._active_conn = None
         self._cancel_requested = False
         self._receiving_started = False
@@ -868,6 +869,8 @@ class App:
         # A cancel from an earlier outgoing transfer stays latched otherwise,
         # and would abort this one's very first chunk.
         self._cancel_requested = False
+        # ...and an answer belongs to the call it was given for.
+        self._consent_answered = False
         try:
             self.transfer.incoming(
                 IncomingOffer(
@@ -898,6 +901,24 @@ class App:
         self.page.run_task(self._watch_receipt_start)
 
     def _resolve_accept(self, accepted: bool, *, decline: bool = False) -> None:
+        """Answer the consent prompt. Only the first answer counts.
+
+        The sender's future is answered first, but the decline branch below
+        does not consult it — so a repeat call carrying ``decline=True`` used
+        to write ``You declined the transfer`` over a transfer that had
+        already been accepted, while the sender kept streaming and reported
+        success. That string is written nowhere else in the app, so the split
+        was always a second answer landing after the first.
+        """
+        if self._consent_answered:
+            _log.warning(
+                "ignored a second answer for the same call (accepted=%s, phase=%s)",
+                accepted,
+                self.transfer.phase.value,
+                stack_info=True,
+            )
+            return
+        self._consent_answered = True
         self._close_dialog()
         future = self._accept_future
         if future is not None and not future.done():

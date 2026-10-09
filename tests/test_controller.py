@@ -5,11 +5,12 @@ card swaps the field's parent subtree, the client recreates the input widget
 and focus is lost mid-word — which is exactly what typing used to do.
 """
 
+import asyncio
 import time
 
 import pytest
 
-from app import config
+from app import config, protocol
 from app.controller import ACTION_RESERVE, App
 from app.models import (
     Batch,
@@ -274,6 +275,51 @@ def test_a_transfer_in_flight_is_left_alone(app):
     app.radar.set_peers([])  # discovery gap while we wait for an answer
     assert tm.phase is Phase.RINGING
     assert app._action_slot.content.height is None
+
+
+async def test_a_second_answer_cannot_overturn_an_acceptance(app):
+    """Receiver reported "declined" while the sender reported success.
+
+    ``_resolve_accept`` answers the sender's future first and *then* decides
+    about a decline without consulting it, so any repeat call carrying
+    ``decline=True`` used to write "You declined the transfer" over a
+    transfer that had already been accepted — while the sender kept
+    streaming and finished green. That string is written nowhere else in the
+    app, so the split is always a second answer landing after the first.
+    """
+    header = protocol.make_offer(
+        one_file_batch(),
+        sender_id="cccc",
+        sender_name="studio-pc",
+        sender_ip="192.168.1.31",
+    )
+    app._validate_offer(header)
+    app._on_ringing(header)
+    assert app.transfer.phase is Phase.INCOMING
+
+    # `_accept()` is parked on this future while the prompt is on screen.
+    future = asyncio.get_running_loop().create_future()
+    app._accept_future = future
+
+    app._resolve_accept(True)  # the user pressed Accept
+    assert app.transfer.phase is Phase.TRANSFERRING
+    assert future.result() is True
+
+    # ...a stray Decline, a Cancel racing in, an echo of the dialog closing
+    app._resolve_accept(False, decline=True)
+
+    assert app.transfer.phase is Phase.TRANSFERRING
+    assert app.transfer.state.error == ""
+    assert app.records == []
+    assert future.result() is True  # the sender was still told "go"
+
+    # the latch belongs to this call only — the next offer is answerable
+    app.transfer.finish(finished_record(MAYA))
+    app._on_ringing(header)
+    assert app.transfer.phase is Phase.INCOMING
+    app._resolve_accept(False, decline=True)
+    assert app.transfer.phase is Phase.FAILED
+    assert app.transfer.state.error == "You declined the transfer"
 
 
 def test_an_offline_sender_still_gets_an_answer(app):
